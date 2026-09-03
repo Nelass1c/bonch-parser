@@ -25,25 +25,34 @@ jobs:
         run: |
           pip install requests beautifulsoup4
 
-      - name: 🛡️ Точечное подключение к Keenetic (только для sut.ru)
+      - name: 🛡️ Точечный маршрут к сайту Бонча через Keenetic
         run: |
           sudo apt-get update
-          sudo apt-get install -y wireguard dnsutils
+          sudo apt-get install -y wireguard
 
-          # 1. Убираем строку DNS, чтобы не вешать сеть виртуальной машины
-          # 2. Меняем 0.0.0.0/0 на подсети Бонча (87.249.0.0/16), чтобы через роутер шёл ТОЛЬКО трафик университета!
+          # 1. Формируем конфиг WireGuard с выключенным авто-маршрутом (Table = off),
+          # чтобы тоннель не трогал сеть самого Гитхаба
           echo "${{ secrets.WG_CONFIG }}" \
             | grep -v "DNS" \
-            | sed 's|AllowedIPs = 0.0.0.0/0|AllowedIPs = 87.249.0.0/16, 92.255.0.0/16|g' \
+            | sed '/\[Interface\]/a Table = off' \
             | sudo tee /etc/wireguard/wg0.conf
 
           sudo chmod 600 /etc/wireguard/wg0.conf
 
-          # Запуск интерфейса
+          # 2. Поднимаем тоннель к Keenetic
           sudo wg-quick up wg0
 
-          echo "✅ WireGuard успешно поднят! Проверяем доступ к сайту Бонча..."
-          curl -I --max-time 10 https://www.sut.ru || echo "Ошибка подключения к сайту"
+          # 3. Вычисляем ТОЧНЫЕ IP-адреса сайта Бонча и направляем их в wg0
+          echo "🔍 Определение IP-адресов сайта Бонча..."
+          for domain in sut.ru www.sut.ru; do
+            for ip in $(getent ahosts $domain | awk '{print $1}' | grep -E '^[0-9.]+$' | sort -u); do
+              echo "➡️ Направляем $domain ($ip) через домашний роутер Keenetic (wg0)..."
+              sudo ip route add $ip dev wg0 || true
+            done
+          done
+
+          echo "✅ Маршрутизация настроена! Проверяем реальный ответ сайта Бонча..."
+          curl -I -A "Mozilla/5.0" --max-time 15 https://www.sut.ru
 
       - name: 🚀 Запуск парсера
         run: |
