@@ -3,7 +3,7 @@ name: Update Schedule via Home Keenetic
 on:
   schedule:
     # Запуск каждые 3 часа
-    - cron: '0 */3 * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch: # Кнопка ручного запуска
 
 permissions: write-all
@@ -56,7 +56,7 @@ jobs:
 
       - name: 🚀 Запуск парсера
         run: |
-          python run_scraper.py
+          python -u run_scraper.py
 
       - name: 🔌 Отключение VPN
         if: always()
