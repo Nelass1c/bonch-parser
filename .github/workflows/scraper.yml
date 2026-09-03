@@ -25,16 +25,25 @@ jobs:
         run: |
           pip install requests beautifulsoup4
 
-      - name: 🛡️ Подключение WireGuard к домашнему Keenetic
+      - name: 🛡️ Точечное подключение к Keenetic (только для sut.ru)
         run: |
           sudo apt-get update
-          sudo apt-get install -y wireguard resolvconf
-          echo "${{ secrets.WG_CONFIG }}" | sudo tee /etc/wireguard/wg0.conf
+          sudo apt-get install -y wireguard dnsutils
+
+          # 1. Убираем строку DNS, чтобы не вешать сеть виртуальной машины
+          # 2. Меняем 0.0.0.0/0 на подсети Бонча (87.249.0.0/16), чтобы через роутер шёл ТОЛЬКО трафик университета!
+          echo "${{ secrets.WG_CONFIG }}" \
+            | grep -v "DNS" \
+            | sed 's|AllowedIPs = 0.0.0.0/0|AllowedIPs = 87.249.0.0/16, 92.255.0.0/16|g' \
+            | sudo tee /etc/wireguard/wg0.conf
+
           sudo chmod 600 /etc/wireguard/wg0.conf
+
+          # Запуск интерфейса
           sudo wg-quick up wg0
-          echo "=== Проверка внешнего IP (должен быть твой домашний) ==="
-          curl -s https://ifconfig.me
-          echo ""
+
+          echo "✅ WireGuard успешно поднят! Проверяем доступ к сайту Бонча..."
+          curl -I --max-time 10 https://www.sut.ru || echo "Ошибка подключения к сайту"
 
       - name: 🚀 Запуск парсера
         run: |
