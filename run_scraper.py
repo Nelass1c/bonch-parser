@@ -3,11 +3,12 @@ import time
 import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 BASE_URL = "https://www.sut.ru/studentu/raspisanie/raspisanie-zanyatiy-studentov-ochnoy-i-vecherney-form-obucheniya"
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
 }
 PAIR_TIMES = {1: "09:00–10:35", 2: "10:45–12:20", 3: "13:00–14:35", 4: "14:45–16:20", 5: "16:30–18:05", 6: "18:15–19:50"}
 DAYS_NAMES = {1: "Понедельник", 2: "Вторник", 3: "Среда", 4: "Четверг", 5: "Пятница", 6: "Суббота"}
@@ -28,9 +29,13 @@ def main():
     session = requests.Session()
     session.headers.update(HEADERS)
     
-    res = session.get(BASE_URL, timeout=20)
-    soup = BeautifulSoup(res.text, "html.parser")
-    
+    try:
+        res = session.get(BASE_URL, timeout=20)
+        soup = BeautifulSoup(res.text, "html.parser")
+    except Exception as e:
+        print(f"❌ Ошибка загрузки списка групп: {e}")
+        return
+
     groups_dict = {}
     groups_faculty = {}
 
@@ -40,17 +45,16 @@ def main():
         if not g_name or not g_id: continue
 
         groups_dict[g_name] = g_id
+        
         header = link.find_previous(["h2", "h3", "h4", "h5"])
         header_text = header.get_text(strip=True).upper() if header else ""
-
         fac = "Другие"
-        for f_abbr in ["ИКСС", "ИТПИ", "РСР", "КБ", "СТЭД", "ИМ", "ИНО", "СПБКТ", "СПБ КТ"]:
+        for f_abbr in ["ИКСС", "ИТПИ", "РСР", "КБ", "СТЭД", "ИМ", "ИНО", "СПБКТ"]:
             if f_abbr in header_text:
                 fac = "СПбКТ" if "СПБ" in f_abbr else f_abbr
                 break
         if fac == "Другие" and g_name.startswith("К") and not g_name.startswith("КБ"):
             fac = "СПбКТ"
-
         groups_faculty[g_name] = fac
 
     print(f"✅ Найдено групп: {len(groups_dict)}")
@@ -106,12 +110,27 @@ def main():
             if done % 100 == 0 or done == len(tasks_args):
                 print(f"[{done}/{len(tasks_args)}] Собрано пар: {len(all_lessons)}")
 
+    # СОХРАНЕНИЕ БАЗЫ
     conn = sqlite3.connect("schedule.db")
     cursor = conn.cursor()
     cursor.execute("BEGIN TRANSACTION;")
+
+    # 🔥 Метаданные с поправкой на МСК (UTC+3)
+    cursor.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT);")
+    cursor.execute("DELETE FROM metadata;")
+    
+    # Считаем время: текущее UTC + 3 часа
+    moscow_now = datetime.now(timezone.utc) + timedelta(hours=3)
+    build_time = moscow_now.strftime("%d.%m.%Y в %H:%M")
+    
+    cursor.execute("INSERT INTO metadata (key, value) VALUES ('build_time', ?);", (build_time,))
+
+    # Таблица групп
     cursor.execute("CREATE TABLE IF NOT EXISTS groups (group_name TEXT PRIMARY KEY, faculty TEXT);")
     cursor.execute("DELETE FROM groups;")
     cursor.executemany("INSERT INTO groups VALUES (?, ?);", [(g, groups_faculty.get(g, "СПбГУТ")) for g in groups_dict.keys()])
+
+    # Таблица расписания
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS lessons (
             id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT, day_num INTEGER, day_name TEXT,
@@ -124,9 +143,10 @@ def main():
         INSERT INTO lessons (group_name, day_num, day_name, pair_num, time_str, subject, lesson_type, teacher, room, week_num, week_date)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     """, all_lessons)
+
     cursor.execute("COMMIT;")
     conn.close()
-    print("🎉 База schedule.db успешно сформирована!")
+    print(f"🎉 База сформирована (MSK: {build_time})!")
 
 if __name__ == "__main__":
     main()
