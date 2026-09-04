@@ -1,15 +1,15 @@
-name: University Schedule Scraper
+name: Database Sync Task
 
 on:
   schedule:
-    # 1. Быстрый парс каждые 2 часа (текущая + следующая неделя)
+    # 1. Быстрый парс каждые 2 часа
     - cron: '0 */2 * * *'
     # 2. Полный парс каждый день в 20:00 по Москве (17:00 UTC)
     - cron: '0 17 * * *'
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Тип парсинга (fast или full)'
+        description: 'Sync mode (fast / full)'
         required: true
         default: 'fast'
 
@@ -17,10 +17,10 @@ permissions:
   contents: write
 
 jobs:
-  scrape:
+  sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -31,13 +31,13 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
-      - name: 📥 Скачивание старой базы (сохранение истории семестра)
+      - name: Fetch previous DB state
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download latest -p "schedule.db" || echo "Первый запуск: база будет создана с нуля"
+          gh release download latest -p "schedule.db" || echo "No previous DB found, initializing new one"
 
-      - name: VPN Connect (WireGuard)
+      - name: Establish secure tunnel
         run: |
           sudo apt-get update && sudo apt-get install -y wireguard
           echo "${{ secrets.WG_CONFIG }}" | grep -v "DNS" | sed '/\[Interface\]/a Table = off' | sudo tee /etc/wireguard/wg0.conf
@@ -48,7 +48,7 @@ jobs:
             done
           done
 
-      - name: Run Scraper
+      - name: Run synchronization script
         run: |
           if [[ "${{ github.event.schedule }}" == "0 17 * * *" || "${{ github.event.inputs.mode }}" == "full" ]]; then
             python -u run_scraper.py --full
@@ -56,16 +56,16 @@ jobs:
             python -u run_scraper.py
           fi
 
-      - name: VPN Disconnect
+      - name: Close tunnel
         if: always()
         run: sudo wg-quick down wg0 || true
 
-      - name: Upload Release
+      - name: Upload new DB
         uses: ncipollo/release-action@v1
         with:
           artifacts: "schedule.db"
           tag: "latest"
-          name: "Актуальная база расписания СПбГУТ"
+          name: "Database Update"
           allowUpdates: true
           replacesArtifacts: true
           makeLatest: true
