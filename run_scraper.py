@@ -38,12 +38,10 @@ def main():
     weeks_plan = get_semester_weeks()
     current_w = get_current_week_num(weeks_plan)
     
-    # Определяем, какие недели парсить
     if is_full_scan:
         target_weeks = [w[0] for w in weeks_plan]
         mode_text = "ПОЛНЫЙ (18 недель)"
     else:
-        # Текущая + следующая (но не выше 18)
         next_w = current_w + 1
         target_weeks = [current_w]
         if next_w <= 18: target_weeks.append(next_w)
@@ -70,7 +68,10 @@ def main():
             if f_abbr in header_text:
                 fac = "СПбКТ" if "СПБ" in f_abbr else f_abbr
                 break
-        if fac == "Другие" and g_name.startsWith("К") and not g_name.startsWith("КБ"): fac = "СПбКТ"
+        
+        # Исправлено: .startswith() вместо .startsWith()
+        if fac == "Другие" and g_name.startswith("К") and not g_name.startswith("КБ"):
+            fac = "СПбКТ"
         groups_faculty[g_name] = fac
 
     tasks_args = []
@@ -92,13 +93,17 @@ def main():
                     for pair_idx, cell in enumerate(cells, start=1):
                         block = cell.find("div", class_="vt258")
                         if not block: continue
+                        subj_el = block.find("div", class_="vt240")
+                        type_el = block.find("div", class_="vt243")
+                        teach_el = block.find("div", class_="vt241")
+                        room_el = block.find("div", class_="vt242")
                         local_lessons.append((
                             grp_name, day_num, DAYS_NAMES[day_num], pair_idx,
                             PAIR_TIMES.get(pair_idx, ""),
-                            block.find("div", class_="vt240").get_text(strip=True),
-                            block.find("div", class_="vt243").get_text(strip=True) if block.find("div", class_="vt243") else "",
-                            block.find("div", class_="vt241").get_text(strip=True) if block.find("div", class_="vt241") else "Не указан",
-                            block.find("div", class_="vt242").get_text(strip=True) if block.find("div", class_="vt242") else "Не указана",
+                            subj_el.get_text(strip=True) if subj_el else "Без названия",
+                            type_el.get_text(strip=True) if type_el else "",
+                            teach_el.get_text(strip=True) if teach_el else "Не указан",
+                            room_el.get_text(strip=True) if room_el else "Не указана",
                             w_num, w_date
                         ))
             return local_lessons, True
@@ -114,21 +119,17 @@ def main():
             done += 1
             if done % 100 == 0: print(f"Прогресс: {done}/{len(tasks_args)}")
 
-    # СОХРАНЕНИЕ (УМНОЕ ОБНОВЛЕНИЕ)
     conn = sqlite3.connect("schedule.db")
     cur = conn.cursor()
     cur.execute("BEGIN TRANSACTION;")
     
-    # 1. Метаданные
     cur.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT);")
     moscow_now = datetime.now(timezone.utc) + timedelta(hours=3)
     cur.execute("INSERT OR REPLACE INTO metadata VALUES ('build_time', ?);", (moscow_now.strftime("%d.%m.%Y в %H:%M"),))
     
-    # 2. Группы
     cur.execute("CREATE TABLE IF NOT EXISTS groups (group_name TEXT PRIMARY KEY, faculty TEXT);")
     cur.executemany("INSERT OR REPLACE INTO groups VALUES (?, ?);", [(g, groups_faculty.get(g, "СПбГУТ")) for g in groups_dict.keys()])
 
-    # 3. Уроки (удаляем только те недели, которые перепарсили)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS lessons (
             id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT, day_num INTEGER, day_name TEXT,
