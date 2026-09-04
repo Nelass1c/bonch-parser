@@ -24,9 +24,8 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Ограничиваем максимальное время работы: если что-то зависнет, через 30 минут процесс завершится
-    timeout-minutes: 30
-
+    
+    timeout-minutes: 120
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
