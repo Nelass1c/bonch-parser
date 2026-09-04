@@ -1,74 +1,68 @@
-name: Update Schedule via Home Keenetic
+name: University Schedule Scraper
 
 on:
   schedule:
-    # Запуск каждые 3 часа
+    # 1. Быстрый парс каждые 2 часа (в 0 минут каждого четного часа)
     - cron: '0 */2 * * *'
-  workflow_dispatch: # Кнопка ручного запуска
+    # 2. Полный парс в 20:00 по МСК (17:00 UTC)
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Тип парсинга (fast или full)'
+        required: true
+        default: 'fast'
 
-permissions: write-all
+permissions:
+  contents: write
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 📥 Клонирование репозитория
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🐍 Установка Python 3.11
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 📦 Установка библиотек
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: VPN Connect (WireGuard)
         run: |
-          pip install requests beautifulsoup4
-
-      - name: 🛡️ Точечный маршрут к сайту Бонча через Keenetic
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wireguard
-
-          # 1. Формируем конфиг WireGuard с выключенным авто-маршрутом (Table = off),
-          # чтобы тоннель не трогал сеть самого Гитхаба
-          echo "${{ secrets.WG_CONFIG }}" \
-            | grep -v "DNS" \
-            | sed '/\[Interface\]/a Table = off' \
-            | sudo tee /etc/wireguard/wg0.conf
-
-          sudo chmod 600 /etc/wireguard/wg0.conf
-
-          # 2. Поднимаем тоннель к Keenetic
+          sudo apt-get update && sudo apt-get install -y wireguard
+          echo "${{ secrets.WG_CONFIG }}" | grep -v "DNS" | sed '/\[Interface\]/a Table = off' | sudo tee /etc/wireguard/wg0.conf
           sudo wg-quick up wg0
-
-          # 3. Вычисляем ТОЧНЫЕ IP-адреса сайта Бонча и направляем их в wg0
-          echo "🔍 Определение IP-адресов сайта Бонча..."
           for domain in sut.ru www.sut.ru; do
             for ip in $(getent ahosts $domain | awk '{print $1}' | grep -E '^[0-9.]+$' | sort -u); do
-              echo "➡️ Направляем $domain ($ip) через домашний роутер Keenetic (wg0)..."
               sudo ip route add $ip dev wg0 || true
             done
           done
 
-          echo "✅ Маршрутизация настроена! Проверяем реальный ответ сайта Бонча..."
-          curl -I -A "Mozilla/5.0" --max-time 15 https://www.sut.ru
-
-      - name: 🚀 Запуск парсера
+      - name: Run Scraper
         run: |
-          python -u run_scraper.py
+          # Если запуск в 17:00 UTC (20:00 MSK) — запускаем полный режим
+          if [[ "${{ github.event.schedule }}" == "0 17 * * *" || "${{ github.event.inputs.mode }}" == "full" ]]; then
+            python -u run_scraper.py --full
+          else
+            python -u run_scraper.py
+          fi
 
-      - name: 🔌 Отключение VPN
+      - name: VPN Disconnect
         if: always()
-        run: |
-          sudo wg-quick down wg0 || true
+        run: sudo wg-quick down wg0 || true
 
-      - name: 💾 Публикация базы в Releases
-        uses: softprops/action-gh-release@v1
+      - name: Upload Release
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: latest
-          name: Актуальная база расписания СПбГУТ
-          files: schedule.db
+          artifacts: "schedule.db"
+          tag: "latest"
+          name: "Актуальная база расписания СПбГУТ"
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
