@@ -2,10 +2,10 @@ name: Database Sync Task
 
 on:
   schedule:
-    # 1. Быстрый парс каждые 2 часа
-    - cron: '0 */2 * * *'
-    # 2. Полный парс каждый день в 20:00 по Москве (17:00 UTC)
-    - cron: '0 17 * * *'
+    # 1. Быстрый парс каждые 2 часа (сдвинули на 14-ю минуту, чтобы уйти от пиковых нагрузок)
+    - cron: '14 */2 * * *'
+    # 2. Полный парс каждый день в 17:15 UTC (20:15 по МСК)
+    - cron: '15 17 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -13,12 +13,20 @@ on:
         required: true
         default: 'fast'
 
+# Запрещаем одновременный запуск двух задач (чтобы не повредить schedule.db)
+concurrency:
+  group: sync-database
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Ограничиваем максимальное время работы: если что-то зависнет, через 30 минут процесс завершится
+    timeout-minutes: 30
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -50,9 +58,12 @@ jobs:
 
       - name: Run synchronization script
         run: |
-          if [[ "${{ github.event.schedule }}" == "0 17 * * *" || "${{ github.event.inputs.mode }}" == "full" ]]; then
+          # Проверяем, совпадает ли расписание или ручной ввод
+          if [[ "${{ github.event.schedule }}" == "15 17 * * *" || "${{ github.event.inputs.mode }}" == "full" ]]; then
+            echo "Running FULL sync mode..."
             python -u run_scraper.py --full
           else
+            echo "Running FAST sync mode..."
             python -u run_scraper.py
           fi
 
