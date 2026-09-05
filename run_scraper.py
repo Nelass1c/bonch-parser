@@ -11,7 +11,17 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
 }
-PAIR_TIMES = {1: "09:00–10:35", 2: "10:45–12:20", 3: "13:00–14:35", 4: "14:45–16:20", 5: "16:30–18:05", 6: "18:15–19:50", 7: "20:00–21:35"}
+
+# Добавлена 7-я пара:
+PAIR_TIMES = {
+    1: "09:00–10:35", 
+    2: "10:45–12:20", 
+    3: "13:00–14:35", 
+    4: "14:45–16:20", 
+    5: "16:30–18:05", 
+    6: "18:15–19:50", 
+    7: "20:00–21:35"
+}
 DAYS_NAMES = {1: "Понедельник", 2: "Вторник", 3: "Среда", 4: "Четверг", 5: "Пятница", 6: "Суббота"}
 
 def get_semester_weeks():
@@ -99,18 +109,34 @@ def main():
                             for pair_idx, cell in enumerate(cells, start=1):
                                 block = cell.find("div", class_="vt258")
                                 if not block: continue
+                                
                                 subj_el = block.find("div", class_="vt240")
                                 type_el = block.find("div", class_="vt243")
                                 teach_el = block.find("div", class_="vt241")
                                 room_el = block.find("div", class_="vt242")
+
+                                # 🔥 Парсинг полного ФИО преподавателя из атрибута title
+                                teacher_full_name = "Не указан"
+                                if teach_el:
+                                    span_teacher = teach_el.find("span", class_="teacher")
+                                    if span_teacher and span_teacher.get("title"):
+                                        t_title = span_teacher.get("title", "").replace(";", "").strip()
+                                        teacher_full_name = t_title if t_title else span_teacher.get_text(strip=True)
+                                    else:
+                                        teacher_full_name = teach_el.get_text(strip=True)
+
                                 local_lessons.append((
-                                    grp_name, day_num, DAYS_NAMES[day_num], pair_idx,
+                                    grp_name, 
+                                    day_num, 
+                                    DAYS_NAMES[day_num], 
+                                    pair_idx,
                                     PAIR_TIMES.get(pair_idx, ""),
                                     subj_el.get_text(strip=True) if subj_el else "Без названия",
                                     type_el.get_text(strip=True) if type_el else "",
-                                    teach_el.get_text(strip=True) if teach_el else "Не указан",
+                                    teacher_full_name,
                                     room_el.get_text(strip=True) if room_el else "Не указана",
-                                    w_num, w_date
+                                    w_num, 
+                                    w_date
                                 ))
                     return grp_name, local_lessons, True
                 elif r.status_code == 429:
