@@ -1,11 +1,6 @@
 name: Database Sync Task
 
 on:
-  schedule:
-    # 1. Быстрый парс каждые 2 часа (сдвинули на 14-ю минуту, чтобы уйти от пиковых нагрузок)
-    - cron: '14 */2 * * *'
-    # 2. Полный парс каждый день в 17:15 UTC (20:15 по МСК)
-    - cron: '15 17 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -13,7 +8,6 @@ on:
         required: true
         default: 'fast'
 
-# Запрещаем одновременный запуск двух задач (чтобы не повредить schedule.db)
 concurrency:
   group: sync-database
   cancel-in-progress: false
